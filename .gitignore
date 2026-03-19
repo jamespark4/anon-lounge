@@ -1,0 +1,4 @@
+node_modules/
+lounge.db
+*.db
+.env
