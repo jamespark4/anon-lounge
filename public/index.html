@@ -481,7 +481,7 @@ function NotifScreen({currentUser,token,onCoinsChange}){
 
 // ── 코인 충전 ─────────────────────────────────────────
 function ShopScreen({currentUser,token,onCoinsChange}){
-  const PAYAPP_URL='https://www.payapp.kr/L/z4av25';
+  const PAYAPP_URL='https://www.payapp.kr/L/z4av37';
 
   return<div style={{flex:1,overflowY:'auto',padding:'12px 13px 80px'}}>
     <div style={{background:`linear-gradient(135deg,${CARD},#1a0f0f)`,border:`1px solid ${GD}28`,borderRadius:20,padding:'20px',marginBottom:16,textAlign:'center'}}>
@@ -792,11 +792,33 @@ function App(){
   const[user,setUser]=useState(null);
   const[badge,setBadge]=useState(0);
   const[toast,setToast]=useState('');
+  const[loadMsg,setLoadMsg]=useState('서버에 연결 중…');
+  const[loadDots,setLoadDots]=useState(0);
 
   useEffect(()=>{
     const t=localStorage.getItem('token');
     if(!t){setScreen('auth');return;}
-    api('GET','/me',null,t).then(u=>{setToken(t);setUser(u);setScreen('main');}).catch(()=>{localStorage.removeItem('token');setScreen('auth');});
+    let tries=0;
+    const maxTries=10;
+    let timer=null;
+    const tryLoad=()=>{
+      tries++;
+      api('GET','/me',null,t)
+        .then(u=>{setToken(t);setUser(u);setScreen('main');})
+        .catch(e=>{
+          const isAuthErr=e.message.includes('만료')||e.message.includes('로그인')||e.message.includes('401');
+          if(isAuthErr||tries>=maxTries){
+            localStorage.removeItem('token');setScreen('auth');
+          }else{
+            setLoadMsg(`서버 시작 중 (${tries*7}초 경과)`);
+            timer=setTimeout(tryLoad,7000);
+          }
+        });
+    };
+    // 점 애니메이션
+    const dotTimer=setInterval(()=>setLoadDots(d=>(d+1)%4),600);
+    tryLoad();
+    return()=>{clearTimeout(timer);clearInterval(dotTimer);};
   },[]);
 
   // 알림 배지 폴링
@@ -808,10 +830,20 @@ function App(){
   },[screen,token]);
 
   const login=(t,u)=>{setToken(t);setUser(u);setScreen('main');};
+  const logout=()=>{localStorage.removeItem('token');setToken('');setUser(null);setScreen('auth');};
   const updateCoins=c=>setUser(u=>({...u,coins:c}));
   const showToast=msg=>{setToast(msg);setTimeout(()=>setToast(''),3000);};
 
-  if(screen==='loading')return<div style={{height:'100vh',background:BG,display:'flex',alignItems:'center',justifyContent:'center'}}><div style={{textAlign:'center'}}><div style={{fontSize:48,marginBottom:8}}>🌙</div><p style={{color:'#333',fontSize:13}}>로딩 중…</p></div></div>;
+  if(screen==='loading')return<div style={{height:'100vh',background:BG,display:'flex',alignItems:'center',justifyContent:'center'}}>
+    <div style={{textAlign:'center'}}>
+      <div style={{fontSize:48,marginBottom:12}}>🌙</div>
+      <div style={{display:'flex',justifyContent:'center',gap:5,marginBottom:14}}>
+        {[0,1,2].map(i=><div key={i} style={{width:7,height:7,borderRadius:'50%',background:i<loadDots?FC:'#1e1e1e',transition:'background .3s'}}/>)}
+      </div>
+      <p style={{color:'#444',fontSize:12,margin:'0 0 4px'}}>{loadMsg}</p>
+      <p style={{color:'#222',fontSize:10}}>무료 서버는 첫 접속 시 최대 1분이 걸릴 수 있어요</p>
+    </div>
+  </div>;
   if(screen==='auth')return<AuthScreen onDone={login} onRegister={()=>setScreen('register')}/>;
   if(screen==='register')return<RegisterWizard onDone={login}/>;
 
@@ -824,8 +856,11 @@ function App(){
           {tab==='lounge'?'익명으로 솔직하게':tab==='notif'?'하트 & 프로필 알림':tab==='shop'?'코인 충전소':'내 프로필'}
         </p>
       </div>
-      <div onClick={()=>setTab('shop')} style={{display:'flex',alignItems:'center',gap:5,background:CARD,borderRadius:20,padding:'5px 11px',border:`1px solid ${GD}20`,cursor:'pointer'}}>
-        <span style={{fontSize:13}}>🪙</span><span style={{color:'#fff',fontSize:13,fontWeight:800}}>{user?.coins}</span>
+      <div style={{display:'flex',gap:7,alignItems:'center'}}>
+        <div onClick={()=>setTab('shop')} style={{display:'flex',alignItems:'center',gap:5,background:CARD,borderRadius:20,padding:'5px 11px',border:`1px solid ${GD}20`,cursor:'pointer'}}>
+          <span style={{fontSize:13}}>🪙</span><span style={{color:'#fff',fontSize:13,fontWeight:800}}>{user?.coins}</span>
+        </div>
+        <button onClick={logout} style={{background:'#1a1a1a',border:`1px solid ${BR}`,borderRadius:20,padding:'5px 10px',color:'#444',fontSize:11,cursor:'pointer',fontWeight:600}}>로그아웃</button>
       </div>
     </div>
     <div style={{flex:1,overflow:'hidden',display:'flex',flexDirection:'column'}}>
