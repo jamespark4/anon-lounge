@@ -93,6 +93,27 @@ const COST_VIEW  = 4;
 const COST_PHONE = 120;
 const CURRENT_YEAR = new Date().getFullYear();
 
+// ── 구글 스프레드시트 웹훅 ────────────────────────────────────
+const SHEETS_WEBHOOK_URL = process.env.SHEETS_WEBHOOK_URL || '';
+
+function notifySheets(payload) {
+  if (!SHEETS_WEBHOOK_URL) return;
+  try {
+    const body = JSON.stringify(payload);
+    const u = new URL(SHEETS_WEBHOOK_URL);
+    const opts = {
+      hostname: u.hostname,
+      path: u.pathname + u.search,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    };
+    const req = https.request(opts, res => { res.resume(); });
+    req.on('error', () => {}); // 실패해도 서버에 영향 없음
+    req.write(body);
+    req.end();
+  } catch (_) {}
+}
+
 function auth(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: '로그인이 필요해요' });
@@ -138,6 +159,7 @@ app.post('/api/auth/register', async (req, res) => {
     );
     const token = jwt.sign({ id }, SECRET, { expiresIn: '30d' });
     const u = (await pool.query('SELECT * FROM users WHERE id=$1', [id])).rows[0];
+    notifySheets({ type: 'user_register', user: { id, gender, birthYear: parseInt(birthYear), phone, via: '일반' } });
     res.json({ token, user: fmtUser(u) });
   } catch (e) { res.status(500).json({ error: '가입 중 오류: ' + e.message }); }
 });
@@ -194,6 +216,7 @@ app.post('/api/posts', auth, async (req, res) => {
     const id = uid();
     await pool.query('INSERT INTO posts (id,user_id,gender,content) VALUES ($1,$2,$3,$4)', [id, req.user.id, u.gender, content.trim()]);
     const post = (await pool.query('SELECT * FROM posts WHERE id=$1', [id])).rows[0];
+    notifySheets({ type: 'post_create', post: { id, userId: req.user.id, content: content.trim(), isAnon: true } });
     res.json({ ...post, commentCount: 0, heartCount: 0, iLiked: false });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -233,6 +256,7 @@ app.post('/api/likes', auth, async (req, res) => {
     await pool.query('UPDATE users SET coins=coins-$1 WHERE id=$2', [COST_HEART, req.user.id]);
     const updated = (await pool.query('SELECT coins FROM users WHERE id=$1', [req.user.id])).rows[0];
     const like = (await pool.query('SELECT * FROM likes WHERE id=$1', [id])).rows[0];
+    notifySheets({ type: 'like_sent', like: { id, fromId: req.user.id, toId: post.user_id, postId } });
     res.json({ like, coins: updated.coins });
   } catch (e) {
     if (e.code === '23505') return res.status(400).json({ error: '이미 하트를 보낸 분이에요' });
@@ -435,6 +459,7 @@ app.post('/api/auth/kakao-register', async (req, res) => {
     );
     const token = jwt.sign({ id }, SECRET, { expiresIn: '30d' });
     const u = (await pool.query('SELECT * FROM users WHERE id=$1', [id])).rows[0];
+    notifySheets({ type: 'user_register', user: { id, gender, birthYear: parseInt(birthYear), phone, via: '카카오' } });
     res.json({ token, user: fmtUser(u) });
   } catch (e) { res.status(500).json({ error: '가입 중 오류: ' + e.message }); }
 });
@@ -491,6 +516,7 @@ app.post('/api/admin/users/:id/coins', adminAuth, async (req, res) => {
       [req.params.id, n, note || '', ADMIN_KEY.slice(0, 8)]
     );
     const { rows } = await pool.query('SELECT coins FROM users WHERE id=$1', [req.params.id]);
+    notifySheets({ type: 'coin_change', log: { userId: req.params.id, delta: n, balance: rows[0].coins, reason: note || '관리자 지급' } });
     res.json({ coins: rows[0].coins });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
