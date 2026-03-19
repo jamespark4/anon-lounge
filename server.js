@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const crypto = require('crypto');
+const https = require('https');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -72,8 +73,11 @@ async function initDB() {
         created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT
       );
     `);
-    // 기존 테이블에 banned 컬럼 추가 (이미 있으면 무시)
+    // 기존 테이블에 컬럼 추가 (이미 있으면 무시)
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT FALSE`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS kakao_id TEXT DEFAULT NULL`);
+    // kakao_id UNIQUE 인덱스 (없을 때만)
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS users_kakao_id_uidx ON users(kakao_id) WHERE kakao_id IS NOT NULL`);
     console.log('✅ DB 초기화 완료');
   } finally {
     client.release();
@@ -312,6 +316,127 @@ app.get('/api/likes/sent', auth, async (req, res) => {
     }));
     res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── 카카오 OAuth ─────────────────────────────────────────────
+const KAKAO_CLIENT_ID    = process.env.KAKAO_CLIENT_ID    || '';
+const KAKAO_REDIRECT_URI = process.env.KAKAO_REDIRECT_URI || 'https://anon-lounge.onrender.com/auth/kakao/callback';
+
+function kakaoPost(url, params) {
+  return new Promise((resolve, reject) => {
+    const body = new URLSearchParams(params).toString();
+    const u = new URL(url);
+    const opts = {
+      hostname: u.hostname, path: u.pathname,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) },
+    };
+    const req = https.request(opts, res => {
+      let d = ''; res.on('data', c => d += c);
+      res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(e); } });
+    });
+    req.on('error', reject); req.write(body); req.end();
+  });
+}
+
+function kakaoGet(url, accessToken) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const opts = {
+      hostname: u.hostname, path: u.pathname,
+      method: 'GET',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    };
+    const req = https.request(opts, res => {
+      let d = ''; res.on('data', c => d += c);
+      res.on('end', () => { try { resolve(JSON.parse(d)); } catch(e) { reject(e); } });
+    });
+    req.on('error', reject); req.end();
+  });
+}
+
+// 카카오 로그인 시작 (→ 카카오 인증 페이지로 리다이렉트)
+app.get('/auth/kakao', (req, res) => {
+  if (!KAKAO_CLIENT_ID) return res.status(503).send('카카오 로그인이 설정되지 않았어요. 관리자에게 문의하세요.');
+  const url = `https://kauth.kakao.com/oauth/authorize?client_id=${KAKAO_CLIENT_ID}&redirect_uri=${encodeURIComponent(KAKAO_REDIRECT_URI)}&response_type=code`;
+  res.redirect(url);
+});
+
+// 카카오 콜백
+app.get('/auth/kakao/callback', async (req, res) => {
+  const { code, error } = req.query;
+  if (error || !code) return res.redirect('/?kakao_error=1');
+  try {
+    // 코드 → 액세스 토큰
+    const tokenData = await kakaoPost('https://kauth.kakao.com/oauth/token', {
+      grant_type: 'authorization_code',
+      client_id: KAKAO_CLIENT_ID,
+      redirect_uri: KAKAO_REDIRECT_URI,
+      code,
+    });
+    if (!tokenData.access_token) return res.redirect('/?kakao_error=1');
+
+    // 사용자 정보 조회
+    const userInfo = await kakaoGet('https://kapi.kakao.com/v2/user/me', tokenData.access_token);
+    const kakaoId = String(userInfo.id);
+
+    // 기존 회원 확인
+    const existing = (await pool.query('SELECT * FROM users WHERE kakao_id=$1', [kakaoId])).rows[0];
+    if (existing) {
+      if (existing.banned) return res.redirect('/?kakao_error=banned');
+      const token = jwt.sign({ id: existing.id }, SECRET, { expiresIn: '30d' });
+      return res.redirect(`/?kakao_token=${token}`);
+    }
+
+    // 신규 → 프로필 설정 토큰 발급
+    const setupToken = jwt.sign({ kakao_id: kakaoId, type: 'kakao_setup' }, SECRET, { expiresIn: '1h' });
+    res.redirect(`/?kakao_setup=${setupToken}`);
+  } catch (e) {
+    console.error('Kakao callback error:', e.message);
+    res.redirect('/?kakao_error=1');
+  }
+});
+
+// 카카오 신규 회원 프로필 등록
+app.post('/api/auth/kakao-register', async (req, res) => {
+  const { setupToken, gender, birthYear, photo, height, bodyType, job, personality, hobbies, bio, phone } = req.body;
+  if (!setupToken) return res.status(400).json({ error: '인증 토큰이 없어요' });
+
+  let payload;
+  try {
+    payload = jwt.verify(setupToken, SECRET);
+    if (payload.type !== 'kakao_setup') throw new Error('invalid type');
+  } catch {
+    return res.status(401).json({ error: '인증이 만료됐어요. 카카오 로그인을 다시 시도해주세요' });
+  }
+
+  const kakaoId = payload.kakao_id;
+  if (!gender || !birthYear || !phone)
+    return res.status(400).json({ error: '필수 정보를 모두 입력해주세요' });
+  if (parseInt(birthYear) > CURRENT_YEAR - 19)
+    return res.status(400).json({ error: '만 19세 이상만 가입 가능해요' });
+
+  try {
+    const dupPhone = await pool.query('SELECT id FROM users WHERE phone=$1', [phone]);
+    if (dupPhone.rows.length > 0)
+      return res.status(400).json({ error: '이미 가입된 전화번호예요' });
+
+    const dupKakao = await pool.query('SELECT id FROM users WHERE kakao_id=$1', [kakaoId]);
+    if (dupKakao.rows.length > 0)
+      return res.status(400).json({ error: '이미 가입된 카카오 계정이에요' });
+
+    const id = uid();
+    const fakeHash = bcrypt.hashSync(uid(), 8); // 카카오 유저는 비밀번호 불필요
+    await pool.query(
+      `INSERT INTO users (id,gender,birth_year,photo,height,body_type,job,personality,hobbies,bio,phone,password,coins,kakao_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,10,$13)`,
+      [id, gender, parseInt(birthYear), photo||null, height||null, bodyType||null, job||null,
+       JSON.stringify(personality||[]), JSON.stringify(hobbies||[]), bio||'', phone, fakeHash, kakaoId]
+    );
+    const token = jwt.sign({ id }, SECRET, { expiresIn: '30d' });
+    const u = (await pool.query('SELECT * FROM users WHERE id=$1', [id])).rows[0];
+    res.json({ token, user: fmtUser(u) });
+  } catch (e) { res.status(500).json({ error: '가입 중 오류: ' + e.message }); }
 });
 
 // ── 관리자 ──────────────────────────────────────────────────

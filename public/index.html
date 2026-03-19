@@ -569,7 +569,7 @@ function MyProfileScreen({currentUser,token}){
 }
 
 // ── 회원가입 ──────────────────────────────────────────
-function RegisterWizard({onDone}){
+function RegisterWizard({onDone,kakaoMode=false,kakaoSetupToken=''}){
   const[step,setStep]=useState(1);
   const[gender,setGender]=useState('');
   const[birthYear,setBirthYear]=useState('');
@@ -602,7 +602,7 @@ function RegisterWizard({onDone}){
   });
 
   const canNext=[
-    gender&&birthYear&&ageOk&&password.length>=6,
+    kakaoMode ? (gender&&birthYear&&ageOk) : (gender&&birthYear&&ageOk&&password.length>=6),
     true,
     height&&bodyType&&job,
     personality.length>0&&hobbies.length>0,
@@ -613,7 +613,12 @@ function RegisterWizard({onDone}){
     if(loading)return;
     setLoading(true);
     try{
-      const r=await api('POST','/auth/register',{gender,birthYear:parseInt(birthYear),photo,height:parseInt(height),bodyType,job,personality,hobbies,bio,phone,password});
+      let r;
+      if(kakaoMode){
+        r=await api('POST','/auth/kakao-register',{setupToken:kakaoSetupToken,gender,birthYear:parseInt(birthYear),photo,height:parseInt(height),bodyType,job,personality,hobbies,bio,phone});
+      }else{
+        r=await api('POST','/auth/register',{gender,birthYear:parseInt(birthYear),photo,height:parseInt(height),bodyType,job,personality,hobbies,bio,phone,password});
+      }
       localStorage.setItem('token',r.token);
       onDone(r.token,r.user);
     }catch(e){alert(e.message);}finally{setLoading(false);}
@@ -630,7 +635,7 @@ function RegisterWizard({onDone}){
   return<div style={{minHeight:'100vh',background:BG,overflowY:'auto',padding:'24px 20px'}}>
     <div style={{textAlign:'center',marginBottom:20,marginTop:12}}>
       <h1 style={{margin:'0 0 2px',fontSize:20,fontWeight:900,background:`linear-gradient(135deg,${FC},${GD})`,WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>🌙 익명라운지</h1>
-      <p style={{color:'#2a2a2a',fontSize:11,margin:0}}>회원가입 · 성인 인증 필수</p>
+      <p style={{color:'#2a2a2a',fontSize:11,margin:0}}>{kakaoMode?'💬 카카오 간편가입 · 성인 인증 필수':'회원가입 · 성인 인증 필수'}</p>
     </div>
     <div style={{maxWidth:400,margin:'0 auto'}}>
       <div style={{display:'flex',gap:5,marginBottom:6}}>
@@ -651,16 +656,19 @@ function RegisterWizard({onDone}){
               </button>
             ))}
           </div>
-          {[
+          {(kakaoMode?[
+            ['출생연도 *','number',birthYear,setBirthYear,'예: 1995'],
+          ]:[
             ['출생연도 *','number',birthYear,setBirthYear,'예: 1995'],
             ['비밀번호 * (6자 이상)','password',password,setPassword,'로그인 시 사용'],
-          ].map(([lbl,tp,val,set,ph])=>(
+          ]).map(([lbl,tp,val,set,ph])=>(
             <div key={lbl} style={{marginBottom:12}}>
               <label style={{color:'#555',fontSize:11,fontWeight:700,display:'block',marginBottom:5}}>{lbl}</label>
               <input type={tp} value={val} onChange={e=>set(e.target.value)} placeholder={ph}
                 style={{width:'100%',padding:'12px 14px',background:CARD,border:`1px solid ${BR}`,borderRadius:12,color:'#fff',fontSize:14,outline:'none',boxSizing:'border-box'}}/>
             </div>
           ))}
+          {kakaoMode&&<div style={{background:'#0a1a0a',border:'1px solid #1a3a1a',borderRadius:10,padding:'9px 12px',marginBottom:8}}><p style={{color:'#4caf50',fontSize:11,margin:0}}>💬 카카오 계정으로 가입 중 · 비밀번호 없이 로그인 가능해요</p></div>}
           {birthYear&&!ageOk&&<p style={{color:FC,fontSize:11,margin:'0 0 8px'}}>⚠️ 만 19세 이상만 가입 가능해요</p>}
           {birthYear&&ageOk&&<p style={{color:'#4caf50',fontSize:11,margin:'0 0 8px'}}>✓ 성인 확인 (만 {new Date().getFullYear()-parseInt(birthYear)}세)</p>}
         </div>}
@@ -763,8 +771,11 @@ function AuthScreen({onDone,onRegister}){
       <button onClick={submit} disabled={loading} className="bp" style={{width:'100%',padding:'14px',background:`linear-gradient(135deg,${FC},#c44569)`,border:'none',borderRadius:13,color:'#fff',fontSize:15,fontWeight:800,cursor:'pointer',marginBottom:9,marginTop:4}}>
         {loading?'로그인 중…':'로그인'}
       </button>
-      <button onClick={onRegister} className="bp" style={{width:'100%',padding:'14px',background:CARD,border:`1px solid ${BR}`,borderRadius:13,color:'#999',fontSize:14,cursor:'pointer'}}>
-        회원가입 (만 19세 이상)
+      <a href="/auth/kakao" className="bp" style={{display:'block',width:'100%',padding:'14px',background:'#FEE500',border:'none',borderRadius:13,color:'#3C1E1E',fontSize:15,fontWeight:800,cursor:'pointer',marginBottom:9,textAlign:'center',textDecoration:'none',boxSizing:'border-box'}}>
+        <span style={{marginRight:6}}>💬</span>카카오로 간편 로그인 / 회원가입
+      </a>
+      <button onClick={onRegister} className="bp" style={{width:'100%',padding:'14px',background:CARD,border:`1px solid ${BR}`,borderRadius:13,color:'#666',fontSize:13,cursor:'pointer'}}>
+        전화번호로 회원가입 (만 19세 이상)
       </button>
     </div>
   </div>;
@@ -786,7 +797,7 @@ function BottomNav({tab,onChange,badge}){
 
 // ── 앱 루트 ───────────────────────────────────────────
 function App(){
-  const[screen,setScreen]=useState('loading'); // loading|auth|register|main
+  const[screen,setScreen]=useState('loading'); // loading|auth|register|kakao-register|main
   const[tab,setTab]=useState('lounge');
   const[token,setToken]=useState('');
   const[user,setUser]=useState(null);
@@ -794,8 +805,34 @@ function App(){
   const[toast,setToast]=useState('');
   const[loadMsg,setLoadMsg]=useState('서버에 연결 중…');
   const[loadDots,setLoadDots]=useState(0);
+  const[kakaoSetupToken,setKakaoSetupToken]=useState('');
 
   useEffect(()=>{
+    // 카카오 OAuth 콜백 URL 파라미터 처리
+    const params=new URLSearchParams(window.location.search);
+    const kakaoToken=params.get('kakao_token');
+    const kakaoSetup=params.get('kakao_setup');
+    const kakaoError=params.get('kakao_error');
+    if(kakaoToken||kakaoSetup||kakaoError){
+      window.history.replaceState({},'','/'); // URL 정리
+      if(kakaoError){
+        setScreen('auth');
+        setTimeout(()=>alert(kakaoError==='banned'?'이용이 정지된 계정이에요. 문의해주세요.':'카카오 로그인 중 오류가 발생했어요. 다시 시도해주세요.'),100);
+        return;
+      }
+      if(kakaoToken){
+        api('GET','/me',null,kakaoToken)
+          .then(u=>{localStorage.setItem('token',kakaoToken);setToken(kakaoToken);setUser(u);setScreen('main');})
+          .catch(()=>setScreen('auth'));
+        return;
+      }
+      if(kakaoSetup){
+        setKakaoSetupToken(kakaoSetup);
+        setScreen('kakao-register');
+        return;
+      }
+    }
+
     const t=localStorage.getItem('token');
     if(!t){setScreen('auth');return;}
     let tries=0;
@@ -846,6 +883,7 @@ function App(){
   </div>;
   if(screen==='auth')return<AuthScreen onDone={login} onRegister={()=>setScreen('register')}/>;
   if(screen==='register')return<RegisterWizard onDone={login}/>;
+  if(screen==='kakao-register')return<RegisterWizard onDone={login} kakaoMode={true} kakaoSetupToken={kakaoSetupToken}/>;
 
   return<div style={{height:'100vh',display:'flex',flexDirection:'column',background:BG,maxWidth:500,margin:'0 auto',overflow:'hidden'}}>
     <Toast msg={toast}/>
