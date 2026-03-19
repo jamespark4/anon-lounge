@@ -33,6 +33,7 @@ async function initDB() {
         phone TEXT NOT NULL UNIQUE,
         password TEXT NOT NULL,
         coins INTEGER DEFAULT 10,
+        banned BOOLEAN DEFAULT FALSE,
         created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT
       );
       CREATE TABLE IF NOT EXISTS posts (
@@ -62,7 +63,17 @@ async function initDB() {
         created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
         UNIQUE(from_user_id, to_user_id)
       );
+      CREATE TABLE IF NOT EXISTS coin_logs (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        note TEXT DEFAULT '',
+        admin_key TEXT DEFAULT '',
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT
+      );
     `);
+    // 기존 테이블에 banned 컬럼 추가 (이미 있으면 무시)
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT FALSE`);
     console.log('✅ DB 초기화 완료');
   } finally {
     client.release();
@@ -135,6 +146,8 @@ app.post('/api/auth/login', async (req, res) => {
     const u = rows[0];
     if (!u || !bcrypt.compareSync(password, u.password))
       return res.status(401).json({ error: '전화번호 또는 비밀번호가 틀렸어요' });
+    if (u.banned)
+      return res.status(403).json({ error: '이용이 정지된 계정이에요. 문의해주세요.' });
     const token = jwt.sign({ id: u.id }, SECRET, { expiresIn: '30d' });
     res.json({ token, user: fmtUser(u) });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -301,14 +314,70 @@ app.get('/api/likes/sent', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 코인 충전
-app.post('/api/coins/purchase', auth, async (req, res) => {
-  const { coins } = req.body;
-  if (!coins || coins <= 0) return res.status(400).json({ error: '올바르지 않은 수량' });
+// ── 관리자 ──────────────────────────────────────────────────
+const ADMIN_KEY = process.env.ADMIN_KEY || 'anon_admin_2024';
+
+function adminAuth(req, res, next) {
+  const key = req.headers['x-admin-key'] || req.query.key;
+  if (!key || key !== ADMIN_KEY) return res.status(401).json({ error: '관리자 인증 실패' });
+  next();
+}
+
+// 전체 회원 목록
+app.get('/api/admin/users', adminAuth, async (req, res) => {
   try {
-    await pool.query('UPDATE users SET coins=coins+$1 WHERE id=$2', [coins, req.user.id]);
-    const updated = (await pool.query('SELECT coins FROM users WHERE id=$1', [req.user.id])).rows[0];
-    res.json({ coins: updated.coins });
+    const { rows } = await pool.query(
+      `SELECT u.id, u.phone, u.gender, u.birth_year, u.job, u.height, u.body_type,
+              u.bio, u.personality, u.hobbies, u.coins, u.banned, u.created_at,
+              (SELECT COUNT(*) FROM posts p WHERE p.user_id=u.id) as post_count,
+              (SELECT COUNT(*) FROM likes l WHERE l.from_user_id=u.id) as sent_hearts,
+              (SELECT COUNT(*) FROM likes l WHERE l.to_user_id=u.id) as recv_hearts
+       FROM users u ORDER BY u.created_at DESC`
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 회원 정지
+app.post('/api/admin/users/:id/ban', adminAuth, async (req, res) => {
+  try {
+    await pool.query('UPDATE users SET banned=TRUE WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 정지 해제
+app.post('/api/admin/users/:id/unban', adminAuth, async (req, res) => {
+  try {
+    await pool.query('UPDATE users SET banned=FALSE WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 코인 수동 지급
+app.post('/api/admin/users/:id/coins', adminAuth, async (req, res) => {
+  const { amount, note } = req.body;
+  const n = parseInt(amount);
+  if (!n || n <= 0 || n > 10000) return res.status(400).json({ error: '수량 오류 (1~10000)' });
+  try {
+    await pool.query('UPDATE users SET coins=coins+$1 WHERE id=$2', [n, req.params.id]);
+    await pool.query(
+      'INSERT INTO coin_logs (user_id, amount, note, admin_key) VALUES ($1,$2,$3,$4)',
+      [req.params.id, n, note || '', ADMIN_KEY.slice(0, 8)]
+    );
+    const { rows } = await pool.query('SELECT coins FROM users WHERE id=$1', [req.params.id]);
+    res.json({ coins: rows[0].coins });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 코인 지급 로그
+app.get('/api/admin/coin-logs', adminAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT cl.*, u.phone, u.gender FROM coin_logs cl
+       JOIN users u ON u.id=cl.user_id ORDER BY cl.created_at DESC LIMIT 200`
+    );
+    res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>익명라운지 관리자</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#0a0a0a;color:#ccc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Malgun Gothic',sans-serif;font-size:13px;}
+h1{font-size:18px;font-weight:900;background:linear-gradient(135deg,#ff6b9d,#d4af37);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #1e1e1e;background:#0d0d0d;position:sticky;top:0;z-index:100;}
+.topbar-right{display:flex;align-items:center;gap:12px;}
+#loginBox{display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;}
+#loginBox input{width:300px;padding:12px 14px;background:#131313;border:1px solid #2a2a2a;border-radius:10px;color:#fff;font-size:14px;outline:none;}
+#loginBox button{width:300px;padding:12px;background:linear-gradient(135deg,#ff6b9d,#c44569);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;}
+#loginErr{color:#ff6b9d;font-size:12px;}
+#mainBox{display:none;padding:16px 20px;}
+.tabs{display:flex;gap:6px;margin-bottom:16px;}
+.tab{padding:7px 16px;background:#131313;border:1px solid #1e1e1e;border-radius:20px;color:#777;font-size:12px;cursor:pointer;transition:all .2s;}
+.tab.active{background:#ff6b9d18;border-color:#ff6b9d44;color:#ff6b9d;font-weight:700;}
+.section{display:none;}
+.section.active{display:block;}
+.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:20px;}
+.stat-card{background:#131313;border:1px solid #1e1e1e;border-radius:12px;padding:14px;text-align:center;}
+.stat-card .val{font-size:24px;font-weight:900;color:#fff;}
+.stat-card .lbl{font-size:11px;color:#555;margin-top:4px;}
+.toolbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;}
+.toolbar input{padding:8px 12px;background:#131313;border:1px solid #2a2a2a;border-radius:8px;color:#fff;font-size:12px;outline:none;width:200px;}
+.btn{padding:7px 14px;border:none;border-radius:8px;font-size:12px;cursor:pointer;font-weight:600;transition:all .2s;}
+.btn-primary{background:linear-gradient(135deg,#ff6b9d,#c44569);color:#fff;}
+.btn-warn{background:#ff980015;border:1px solid #ff980040;color:#ff9800;}
+.btn-danger{background:#f4433615;border:1px solid #f4433640;color:#f44336;}
+.btn-success{background:#4caf5015;border:1px solid #4caf5040;color:#4caf50;}
+.btn-gray{background:#1e1e1e;border:1px solid #2a2a2a;color:#888;}
+.btn:disabled{opacity:.4;cursor:default;}
+table{width:100%;border-collapse:collapse;font-size:12px;}
+th{background:#111;color:#555;font-weight:700;padding:8px 10px;text-align:left;border-bottom:1px solid #1e1e1e;white-space:nowrap;position:sticky;top:60px;}
+td{padding:8px 10px;border-bottom:1px solid #141414;vertical-align:middle;}
+tr:hover td{background:#0f0f0f;}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;}
+.badge-f{background:#ff6b9d18;color:#ff6b9d;border:1px solid #ff6b9d30;}
+.badge-m{background:#4a9eff18;color:#4a9eff;border:1px solid #4a9eff30;}
+.badge-ban{background:#f4433618;color:#f44336;border:1px solid #f4433630;}
+.badge-ok{background:#4caf5018;color:#4caf50;border:1px solid #4caf5030;}
+.coin-input{width:70px;padding:5px 8px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:6px;color:#fff;font-size:12px;text-align:center;outline:none;}
+.note-input{width:100px;padding:5px 8px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:6px;color:#fff;font-size:12px;outline:none;}
+.loading{text-align:center;padding:40px;color:#333;font-size:13px;}
+.err{color:#f44336;font-size:12px;margin:8px 0;}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:#0a0a0a;}
+::-webkit-scrollbar-thumb{background:#252525;border-radius:2px;}
+.table-wrap{overflow-x:auto;border-radius:12px;border:1px solid #1e1e1e;}
+.log-table td:first-child{color:#555;font-size:11px;}
+</style>
+</head>
+<body>
+
+<!-- 로그인 -->
+<div id="loginBox">
+  <div style="text-align:center;margin-bottom:8px;">
+    <div style="font-size:40px;margin-bottom:8px;">🌙</div>
+    <h1 style="-webkit-text-fill-color:unset;background:none;font-size:20px;color:#fff;margin-bottom:4px;">익명라운지 관리자</h1>
+    <p style="color:#333;font-size:12px;">관리자 전용 페이지</p>
+  </div>
+  <input type="password" id="keyInput" placeholder="관리자 비밀번호 입력" onkeydown="if(event.key==='Enter')login()"/>
+  <button onclick="login()">로그인</button>
+  <span id="loginErr"></span>
+</div>
+
+<!-- 메인 -->
+<div id="mainBox">
+  <div class="topbar">
+    <h1>🌙 익명라운지 관리자</h1>
+    <div class="topbar-right">
+      <span style="color:#555;font-size:11px;" id="lastUpdated"></span>
+      <button class="btn btn-gray" onclick="loadAll()">🔄 새로고침</button>
+      <button class="btn btn-gray" onclick="logout()">로그아웃</button>
+    </div>
+  </div>
+
+  <div style="padding:16px 20px 0;">
+    <!-- 통계 -->
+    <div class="stats" id="statsRow"></div>
+
+    <!-- 탭 -->
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('users',this)">👥 회원 목록</div>
+      <div class="tab" onclick="switchTab('logs',this)">💰 코인 지급 내역</div>
+    </div>
+
+    <!-- 회원 목록 -->
+    <div class="section active" id="tab-users">
+      <div class="toolbar">
+        <input type="text" id="search" placeholder="전화번호 / 직업 검색…" oninput="filterUsers()"/>
+        <select id="filterGender" onchange="filterUsers()" style="padding:8px 10px;background:#131313;border:1px solid #2a2a2a;border-radius:8px;color:#ccc;font-size:12px;outline:none;">
+          <option value="">성별 전체</option>
+          <option value="F">♀ 여성</option>
+          <option value="M">♂ 남성</option>
+        </select>
+        <select id="filterStatus" onchange="filterUsers()" style="padding:8px 10px;background:#131313;border:1px solid #2a2a2a;border-radius:8px;color:#ccc;font-size:12px;outline:none;">
+          <option value="">상태 전체</option>
+          <option value="ok">정상</option>
+          <option value="ban">정지</option>
+        </select>
+        <button class="btn btn-gray" onclick="exportCSV()">📥 CSV 내보내기</button>
+      </div>
+      <div id="userErr" class="err"></div>
+      <div class="table-wrap">
+        <table id="userTable">
+          <thead>
+            <tr>
+              <th>가입일</th>
+              <th>전화번호</th>
+              <th>성별</th>
+              <th>나이</th>
+              <th>직업</th>
+              <th>키/체형</th>
+              <th>글</th>
+              <th>보낸♥</th>
+              <th>받은♥</th>
+              <th>코인</th>
+              <th>상태</th>
+              <th style="min-width:260px;">코인 지급</th>
+              <th>정지</th>
+            </tr>
+          </thead>
+          <tbody id="userTbody">
+            <tr><td colspan="13" class="loading">로딩 중…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 코인 내역 -->
+    <div class="section" id="tab-logs">
+      <div id="logErr" class="err"></div>
+      <div class="table-wrap">
+        <table class="log-table">
+          <thead>
+            <tr>
+              <th>일시</th>
+              <th>전화번호</th>
+              <th>성별</th>
+              <th>지급 코인</th>
+              <th>메모</th>
+            </tr>
+          </thead>
+          <tbody id="logTbody">
+            <tr><td colspan="5" class="loading">로딩 중…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let adminKey = '';
+let allUsers = [];
+const YEAR = new Date().getFullYear();
+
+function fmtDate(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts * 1000);
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function fmtTime(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts * 1000);
+  return fmtDate(ts) + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+
+async function adminFetch(method, path, body) {
+  const res = await fetch('/api/admin' + path, {
+    method,
+    headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || '오류');
+  return data;
+}
+
+async function login() {
+  const key = document.getElementById('keyInput').value.trim();
+  if (!key) return;
+  try {
+    const data = await (async () => {
+      const res = await fetch('/api/admin/users', { headers: { 'x-admin-key': key } });
+      if (res.status === 401) throw new Error('비밀번호가 틀렸어요');
+      return res.json();
+    })();
+    adminKey = key;
+    document.getElementById('loginBox').style.display = 'none';
+    document.getElementById('mainBox').style.display = 'block';
+    allUsers = data;
+    renderUsers(data);
+    updateStats(data);
+    loadLogs();
+  } catch (e) {
+    document.getElementById('loginErr').textContent = e.message;
+  }
+}
+
+function logout() {
+  adminKey = '';
+  document.getElementById('loginBox').style.display = 'flex';
+  document.getElementById('mainBox').style.display = 'none';
+  document.getElementById('keyInput').value = '';
+}
+
+function updateStats(users) {
+  const total = users.length;
+  const female = users.filter(u => u.gender === 'F').length;
+  const male = users.filter(u => u.gender === 'M').length;
+  const banned = users.filter(u => u.banned).length;
+  const totalCoins = users.reduce((a, u) => a + (u.coins || 0), 0);
+  document.getElementById('statsRow').innerHTML = `
+    <div class="stat-card"><div class="val">${total}</div><div class="lbl">전체 회원</div></div>
+    <div class="stat-card"><div class="val" style="color:#ff6b9d">${female}</div><div class="lbl">여성</div></div>
+    <div class="stat-card"><div class="val" style="color:#4a9eff">${male}</div><div class="lbl">남성</div></div>
+    <div class="stat-card"><div class="val" style="color:#f44336">${banned}</div><div class="lbl">정지 회원</div></div>
+    <div class="stat-card"><div class="val" style="color:#d4af37">${totalCoins.toLocaleString()}</div><div class="lbl">총 보유 코인</div></div>
+  `;
+}
+
+function filterUsers() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const g = document.getElementById('filterGender').value;
+  const s = document.getElementById('filterStatus').value;
+  let arr = allUsers;
+  if (q) arr = arr.filter(u => u.phone.includes(q) || (u.job||'').toLowerCase().includes(q) || (u.bio||'').toLowerCase().includes(q));
+  if (g) arr = arr.filter(u => u.gender === g);
+  if (s === 'ok') arr = arr.filter(u => !u.banned);
+  if (s === 'ban') arr = arr.filter(u => u.banned);
+  renderUsers(arr);
+}
+
+function renderUsers(users) {
+  const tbody = document.getElementById('userTbody');
+  if (!users.length) { tbody.innerHTML = '<tr><td colspan="13" class="loading" style="color:#333">회원이 없어요</td></tr>'; return; }
+  tbody.innerHTML = users.map(u => {
+    const age = YEAR - u.birth_year;
+    const statusBadge = u.banned
+      ? '<span class="badge badge-ban">정지</span>'
+      : '<span class="badge badge-ok">정상</span>';
+    const genderBadge = u.gender === 'F'
+      ? '<span class="badge badge-f">♀ 여성</span>'
+      : '<span class="badge badge-m">♂ 남성</span>';
+    const banBtn = u.banned
+      ? `<button class="btn btn-success" onclick="toggleBan('${u.id}',false)">해제</button>`
+      : `<button class="btn btn-danger" onclick="toggleBan('${u.id}',true)">정지</button>`;
+    return `<tr id="row-${u.id}">
+      <td style="color:#555">${fmtDate(u.created_at)}</td>
+      <td style="color:#fff;font-weight:700">${u.phone}</td>
+      <td>${genderBadge}</td>
+      <td>${age}세</td>
+      <td style="color:#aaa">${u.job||'-'}</td>
+      <td style="color:#555">${u.height||'-'}cm / ${u.body_type||'-'}</td>
+      <td style="text-align:center">${u.post_count||0}</td>
+      <td style="text-align:center">${u.sent_hearts||0}</td>
+      <td style="text-align:center">${u.recv_hearts||0}</td>
+      <td style="color:#d4af37;font-weight:700" id="coins-${u.id}">🪙 ${u.coins}</td>
+      <td>${statusBadge}</td>
+      <td>
+        <div style="display:flex;gap:5px;align-items:center">
+          <input class="coin-input" id="coin-amt-${u.id}" type="number" placeholder="수량" min="1" max="10000"/>
+          <input class="note-input" id="coin-note-${u.id}" type="text" placeholder="메모(결제번호 등)"/>
+          <button class="btn btn-warn" onclick="addCoins('${u.id}')">지급</button>
+        </div>
+      </td>
+      <td>${banBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function toggleBan(id, ban) {
+  const action = ban ? '정지' : '정지 해제';
+  if (!confirm(`이 회원을 ${action}하시겠어요?`)) return;
+  try {
+    await adminFetch('POST', `/users/${id}/${ban ? 'ban' : 'unban'}`);
+    const u = allUsers.find(u => u.id === id);
+    if (u) u.banned = ban;
+    filterUsers();
+    updateStats(allUsers);
+  } catch (e) { alert('오류: ' + e.message); }
+}
+
+async function addCoins(id) {
+  const amtEl = document.getElementById('coin-amt-' + id);
+  const noteEl = document.getElementById('coin-note-' + id);
+  const amount = parseInt(amtEl.value);
+  if (!amount || amount < 1) { alert('수량을 입력해주세요'); return; }
+  try {
+    const r = await adminFetch('POST', `/users/${id}/coins`, { amount, note: noteEl.value });
+    const u = allUsers.find(u => u.id === id);
+    if (u) u.coins = r.coins;
+    document.getElementById('coins-' + id).textContent = '🪙 ' + r.coins;
+    amtEl.value = '';
+    noteEl.value = '';
+    updateStats(allUsers);
+    // 로그 새로고침
+    loadLogs();
+  } catch (e) { alert('오류: ' + e.message); }
+}
+
+async function loadAll() {
+  try {
+    allUsers = await adminFetch('GET', '/users');
+    filterUsers();
+    updateStats(allUsers);
+    await loadLogs();
+    document.getElementById('lastUpdated').textContent = '업데이트: ' + new Date().toLocaleTimeString('ko-KR');
+  } catch (e) { document.getElementById('userErr').textContent = '로딩 오류: ' + e.message; }
+}
+
+async function loadLogs() {
+  try {
+    const logs = await adminFetch('GET', '/coin-logs');
+    const tbody = document.getElementById('logTbody');
+    if (!logs.length) { tbody.innerHTML = '<tr><td colspan="5" class="loading" style="color:#333">지급 내역 없음</td></tr>'; return; }
+    tbody.innerHTML = logs.map(l => `
+      <tr>
+        <td>${fmtTime(l.created_at)}</td>
+        <td style="color:#fff">${l.phone}</td>
+        <td>${l.gender==='F'?'<span class="badge badge-f">♀</span>':'<span class="badge badge-m">♂</span>'}</td>
+        <td style="color:#d4af37;font-weight:700">+${l.amount} 코인</td>
+        <td style="color:#666">${l.note||'-'}</td>
+      </tr>`).join('');
+  } catch (e) { document.getElementById('logErr').textContent = '로그 로딩 오류: ' + e.message; }
+}
+
+function switchTab(id, el) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+  el.classList.add('active');
+}
+
+function exportCSV() {
+  const rows = [['가입일','전화번호','성별','나이','직업','키','체형','코인','상태','글','보낸하트','받은하트','소개']];
+  allUsers.forEach(u => {
+    rows.push([
+      fmtDate(u.created_at), u.phone, u.gender==='F'?'여성':'남성', YEAR-u.birth_year,
+      u.job||'', u.height||'', u.body_type||'', u.coins, u.banned?'정지':'정상',
+      u.post_count||0, u.sent_hearts||0, u.recv_hearts||0, (u.bio||'').replace(/,/g,' ')
+    ]);
+  });
+  const csv = '\uFEFF' + rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = '익명라운지_회원목록_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+}
+
+document.getElementById('keyInput').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+</script>
+</body>
+</html>
