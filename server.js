@@ -532,12 +532,47 @@ app.get('/api/admin/coin-logs', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// 헬스체크 엔드포인트
+app.get('/health', (_, res) => res.json({ status: 'ok', time: Date.now() }));
+
 // SPA fallback
 app.get('*', (_, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
+// ── Self-ping: Render 무료 플랜 Cold Start 방지 ─────────────
+// 14분마다 자기 자신에게 HTTP 요청을 보내 서버가 잠들지 않도록 유지
+function startKeepAlive() {
+  const APP_URL = process.env.APP_URL || 'https://anon-lounge.onrender.com';
+  const INTERVAL_MS = 14 * 60 * 1000; // 14분 (Render는 15분 비활성 시 슬립)
+
+  setInterval(() => {
+    try {
+      const u = new URL(APP_URL + '/health');
+      const opts = {
+        hostname: u.hostname,
+        path: u.pathname,
+        method: 'GET',
+        headers: { 'User-Agent': 'keep-alive-self-ping' },
+      };
+      const req = https.request(opts, res => {
+        res.resume();
+        console.log(`[keep-alive] ping OK (${res.statusCode})`);
+      });
+      req.on('error', err => console.log('[keep-alive] ping error:', err.message));
+      req.end();
+    } catch (e) {
+      console.log('[keep-alive] ping exception:', e.message);
+    }
+  }, INTERVAL_MS);
+
+  console.log(`[keep-alive] 자동 핑 활성화 → ${APP_URL}/health (14분 간격)`);
+}
+
 // 서버 시작
 initDB().then(() => {
-  app.listen(PORT, () => console.log(`🌙 익명라운지 실행 중 → http://localhost:${PORT}`));
+  app.listen(PORT, () => {
+    console.log(`🌙 익명라운지 실행 중 → http://localhost:${PORT}`);
+    startKeepAlive();
+  });
 }).catch(err => {
   console.error('DB 초기화 실패:', err);
   process.exit(1);
